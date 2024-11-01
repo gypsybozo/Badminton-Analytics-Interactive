@@ -17,10 +17,12 @@ class BadmintonAnalyzer:
         self.video_path = video_path
         self.conf_threshold = conf_threshold
         
-        # Initialize detectors
-        self.player_detector = PlayerDetector(conf_threshold)
-        self.shuttle_detector = ShuttleDetector(conf_threshold)
+        # Initialize court detector first
         self.court_detector = CourtDetector(conf_threshold)
+        
+        # Initialize other detectors, passing court detector to player detector
+        self.player_detector = PlayerDetector(conf_threshold, court_detector=self.court_detector)
+        self.shuttle_detector = ShuttleDetector(conf_threshold)
         
         self.trajectory_data = []
         
@@ -65,8 +67,8 @@ class BadmintonAnalyzer:
             if court_coords:
                 self.court_detector.draw_court_lines(frame, court_coords)
             
-            # Detect players
-            player_detections = self.player_detector.detect_players(frame)
+            # Detect players (pass court coordinates)
+            player_detections = self.player_detector.detect_players(frame, court_coords)
             
             # Detect shuttlecock
             shuttle_detections = self.shuttle_detector.detect_shuttlecock(frame)
