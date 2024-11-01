@@ -1,32 +1,34 @@
 import cv2
-from trackers.player import PlayerDetector
-from trackers.shuttle import ShuttleDetector
-from trackers.court import CourtDetector
+from ultralytics import YOLO
+import numpy as np
 from datetime import datetime
 import json
+from inference_sdk import InferenceHTTPClient
+
+CLIENT = InferenceHTTPClient(
+    api_url="https://detect.roboflow.com",
+    api_key="3zcYipvGszKYVhtJ8E5J"
+)
+
 
 class BadmintonAnalyzer:
-    def __init__(self, video_path, conf_threshold=0.3):
+    def __init__(self, model_path, video_path, conf_threshold=0.3):
         """
-        Initialize the BadmintonAnalyzer with video path and configurations
+        Initialize the BadmintonAnalyzer with model and video paths
         
         Args:
+            model_path (str): Path to trained YOLOv8 model weights
             video_path (str): Path to input video file
             conf_threshold (float): Confidence threshold for detections
         """
+        self.model = YOLO(model_path)
         self.video_path = video_path
         self.conf_threshold = conf_threshold
-        
-        # Initialize detectors
-        self.player_detector = PlayerDetector(conf_threshold)
-        self.shuttle_detector = ShuttleDetector(conf_threshold)
-        self.court_detector = CourtDetector(conf_threshold)
-        
         self.trajectory_data = []
         
     def process_video(self, save_output=True, output_path=None):
         """
-        Process the video and track players, shuttle, and court
+        Process the video and track shuttle positions
         
         Args:
             save_output (bool): Whether to save the processed video
@@ -34,52 +36,52 @@ class BadmintonAnalyzer:
         """
         cap = cv2.VideoCapture(self.video_path)
         
+        # Get video properties
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         fps = int(cap.get(cv2.CAP_PROP_FPS))
         
+        # Setup video writer if saving output
         if save_output:
             if output_path is None:
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                output_path = f'outputs/badminton_analysis_{timestamp}.mp4'
+                output_path = f'output_video_{timestamp}.mp4'
             
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             out = cv2.VideoWriter(output_path, fourcc, fps, (frame_width, frame_height))
         
         frame_count = 0
-        court_coords = None
         
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
+                
+            # Run YOLOv8 inference on the frame
+            results = self.model(frame, conf=self.conf_threshold)[0]
             
-            # Detect court boundaries (first frame only)
-            if court_coords is None:
-                court_coords = self.court_detector.detect_court_boundary(frame)
-                if court_coords is None:
-                    print("Could not detect court boundaries.")
-                    break
-            
-            # Draw court lines
-            if court_coords:
-                self.court_detector.draw_court_lines(frame, court_coords)
-            
-            # Detect players
-            player_detections = self.player_detector.detect_players(frame)
-            
-            # Detect shuttlecock
-            shuttle_detections = self.shuttle_detector.detect_shuttlecock(frame)
-            
-            # Combine detections
-            frame_detections = player_detections + shuttle_detections
-            
-            # Add frame information to detections
-            for detection in frame_detections:
-                detection.update({
+            # Process detections
+            frame_detections = []
+            for detection in results.boxes.data:
+                x1, y1, x2, y2, confidence, class_id = detection
+                
+                # Convert tensor values to integers
+                box = [int(x1), int(y1), int(x2), int(y2)]
+                confidence = float(confidence)
+                
+                # Store detection data
+                frame_detections.append({
                     'frame_number': frame_count,
-                    'timestamp': frame_count / fps
+                    'timestamp': frame_count / fps,
+                    'box': box,
+                    'confidence': confidence
                 })
+                
+                # Draw bounding box
+                cv2.rectangle(frame, (box[0], box[1]), (box[2], box[3]), (0, 255, 0), 2)
+                cv2.putText(frame, f'Shuttle: {confidence:.2f}', 
+                           (box[0], box[1] - 10),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
             
             self.trajectory_data.extend(frame_detections)
             
@@ -90,19 +92,20 @@ class BadmintonAnalyzer:
             if save_output:
                 out.write(frame)
             
+            # Display the frame
             cv2.imshow('Badminton Analysis', frame)
             
+            # Break loop if 'q' is pressed
             if cv2.waitKey(1) & 0xFF == ord('q'):
                 break
                 
             frame_count += 1
         
+        # Clean up
         cap.release()
         if save_output:
             out.release()
         cv2.destroyAllWindows()
-        
-        return self.trajectory_data
         
     def save_trajectory_data(self, output_path=None):
         """
@@ -120,12 +123,11 @@ class BadmintonAnalyzer:
         
         print(f"Trajectory data saved to {output_path}")
 
-def main():
+# Example usage
+if __name__ == "__main__":
+    model_path = "models/shuttle/v8_after_change/best.pt"
     video_path = "input/video.mov"
     
-    analyzer = BadmintonAnalyzer(video_path)
-    trajectory_data = analyzer.process_video(save_output=True)
+    analyzer = BadmintonAnalyzer(model_path, video_path)
+    analyzer.process_video(save_output=True)
     analyzer.save_trajectory_data()
-
-if __name__ == "__main__":
-    main()
