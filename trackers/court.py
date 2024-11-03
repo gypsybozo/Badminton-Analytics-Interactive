@@ -56,3 +56,12 @@ class CourtDetector:
         cv2.line(frame, (court_coords[1][0], court_coords[1][3]), (court_coords[2][0], court_coords[2][1]), (255, 255, 255), 5)
         cv2.line(frame, (court_coords[2][0], court_coords[2][1]), (court_coords[3][2], court_coords[3][1]), (255, 255, 255), 5)
         cv2.line(frame, (court_coords[3][2], court_coords[3][1]), (court_coords[0][2], court_coords[0][3]), (255, 255, 255), 5)
+        
+        #save the actual corners
+        actual_bounds=[]
+        actual_bounds.append((court_coords[0][2], court_coords[0][3]))
+        actual_bounds.append((court_coords[1][0], court_coords[1][3]))
+        actual_bounds.append((court_coords[2][0], court_coords[2][1]))
+        actual_bounds.append((court_coords[3][2], court_coords[3][1]))
+        # print(actual_bounds)
+        return actual_bounds
