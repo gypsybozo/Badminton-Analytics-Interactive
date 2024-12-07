@@ -1,8 +1,6 @@
 # 🏸 Badminton-Analytics-Interactive
 
-## Overview
-
-Badminton-Analytics-Interactive is a computer vision system designed to provide deep, data-driven insights into badminton gameplay.
+A computer vision system designed to provide deep, data-driven insights into badminton gameplay.
 
 https://github.com/user-attachments/assets/71d8c9e2-6353-40dc-905c-e5ffa84c0191
 
@@ -68,8 +66,7 @@ badminton-analytics/
 
 ## 🤖 Upcoming Features
 - LLM-powered tactical insights generation
-- Comprehensive player performance dashboard
-
+  
 ## 🚦 Installation
 ```bash
 # Clone the repository
