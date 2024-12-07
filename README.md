@@ -4,7 +4,7 @@ A computer vision system designed to provide deep, data-driven insights into bad
 
 https://github.com/user-attachments/assets/71d8c9e2-6353-40dc-905c-e5ffa84c0191
 
-## 🚀 Key Features
+## Key Features
 
 - **Real-time Object Detection**
   - Track shuttle, players, and rackets with high precision
@@ -26,7 +26,7 @@ patterns.
   - Generate heatmaps of player court coverage
   - Analyze rally patterns and tactical strategies
 
-## 🛠 Tech Stack
+## Tech Stack
 
 - Python
 - OpenCV
@@ -55,7 +55,7 @@ badminton-analytics/
 └── main.py
 ```
 
-## 🔍 Detailed Capabilities
+## Detailed Capabilities
 
 ### Shot Detection Techniques
 - **Proximity Detection**: Identifies shots based on racket-shuttle closeness
@@ -68,10 +68,10 @@ badminton-analytics/
 - Rally pattern analysis
 - Court area utilization heatmaps
 
-## 🤖 Upcoming Features
+## Upcoming Features
 - LLM-powered tactical insights generation
   
-## 🚦 Installation
+## Installation
 ```bash
 # Clone the repository
 git clone https://github.com/yourusername/badminton-analytics.git
@@ -79,16 +79,16 @@ git clone https://github.com/yourusername/badminton-analytics.git
 # Install dependencies
 pip install -r requirements.txt
 ```
-## 🎮 Usage
+## Usage
 ```bash
 python main.py
 ```
-## 📊 Performance Metrics
+## Performance Metrics
 - **Object Detection Accuracy**: 92%
 - **Shot Detection Precision**: 87%
 - **Computational Overhead**: Low (Real-time processing)
 
-## 📞 Contact
+## Contact
 [Kriti Bharadwaj](mailto:kriti.bharadwaj03@gmail.com)
 
 
