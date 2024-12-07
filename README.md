@@ -83,10 +83,6 @@ pip install -r requirements.txt
 ```bash
 python main.py
 ```
-## Performance Metrics
-- **Object Detection Accuracy**: 92%
-- **Shot Detection Precision**: 87%
-- **Computational Overhead**: Low (Real-time processing)
 
 ## Contact
 [Kriti Bharadwaj](mailto:kriti.bharadwaj03@gmail.com)
