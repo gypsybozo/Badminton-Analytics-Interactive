@@ -1,4 +1,4 @@
-# Badminton-Analytics-Interactive
+# 🏸 Badminton-Analytics-Interactive
 
 ## Overview
 
