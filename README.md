@@ -1,11 +1,10 @@
 # Badminton-Analytics-Interactive
 
-
-https://github.com/user-attachments/assets/71d8c9e2-6353-40dc-905c-e5ffa84c0191
-
 ## Overview
 
-Badminton Analytics is an advanced computer vision system designed to provide deep, data-driven insights into badminton gameplay. Leveraging state-of-the-art machine learning and computer vision techniques, this project transforms raw video footage into a comprehensive performance analysis tool.
+Badminton-Analytics-Interactive is a computer vision system designed to provide deep, data-driven insights into badminton gameplay.
+
+https://github.com/user-attachments/assets/71d8c9e2-6353-40dc-905c-e5ffa84c0191
 
 ## 🚀 Key Features
 
