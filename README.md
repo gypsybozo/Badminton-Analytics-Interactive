@@ -13,6 +13,10 @@ https://github.com/user-attachments/assets/71d8c9e2-6353-40dc-905c-e5ffa84c0191
 - **Court Line Detection**
   - Automatically identifies and maps court boundaries
   - Enables precise spatial analysis of player movements
+    
+- **Dataset Creation**
+  - Developed a dataset linking shot origins, destinations, player positions, timestamps and rally outcome.
+patterns.
 
 - **Shot Analysis**
   - Detects shots using multiple sophisticated techniques
