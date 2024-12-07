@@ -18,8 +18,8 @@ Badminton Analytics is an advanced computer vision system designed to provide de
   - Enables precise spatial analysis of player movements
 
 - **Shot Analysis**
-  - Detect and classify shots using multiple sophisticated techniques
-  - Capture shot origins, trajectories, and player interactions
+  - Detects shots using multiple sophisticated techniques
+  - Capture shot origins and rally patterns
 
 - **Performance Visualization**
   - Generate heatmaps of player court coverage
