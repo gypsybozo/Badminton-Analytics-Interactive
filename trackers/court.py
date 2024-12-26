@@ -1,6 +1,7 @@
 import cv2
 from ultralytics import YOLO
 from pathlib import Path
+import numpy as np
 
 class CourtDetector:
     def __init__(self, conf_threshold=0.3, model_path='models/court_detection/best.pt'):
@@ -30,19 +31,41 @@ class CourtDetector:
         court_coords = []
         results = self.model(frame, conf=self.conf_threshold)
         
-        # Loop through detected objects to find court boundary
         for result in results:
             for box in result.boxes:
-                # Assume the court boundary class ID is known, e.g., 0
-                if box.cls[0] == 0:  # Change this ID based on your model's court boundary class ID
+                if box.cls[0] == 0:  
                     x1, y1, x2, y2 = box.xyxy[0].cpu().numpy().astype(int)
-                    # Return coordinates of the boundary as a tuple of points
                     court_coords.append((x1, y1, x2, y2))
         
-        if len(court_coords) == 4:
-            return court_coords  # Return the four bounding boxes
-        return None  # Continue detection if fewer than four boxes are found
-    
+        # if len(court_coords) == 4:
+        #     return court_coords  # Return the four bounding boxes
+        return court_coords  # Continue detection if fewer than four boxes are found
+
+    def sort_court_coords(self, court_coords):
+        """
+        Sort court coordinates in order: clockwise, top left first.
+        
+        Args:
+            court_coords: List of (x1, y1, x2, y2) bounding box coordinates.
+        
+        Returns:
+            sorted_coords: List of ordered (x1, y1, x2, y2) coordinates.
+        """
+        centers = [(int((x1 + x2) / 2), int((y1 + y2) / 2)) for (x1, y1, x2, y2) in court_coords]
+        
+        boxes_with_centers = list(zip(court_coords, centers))
+        
+        # Sort by y-coordinate to separate top and bottom rows
+        boxes_with_centers = sorted(boxes_with_centers, key=lambda box_center: box_center[1][1])
+        
+        # Split into top and bottom based on sorted y-coordinate
+        top_two = sorted(boxes_with_centers[:2], key=lambda box_center: box_center[1][0])  # Sort top row by x
+        bottom_two = sorted(boxes_with_centers[2:], key=lambda box_center: box_center[1][0])  # Sort bottom row by x
+        
+        sorted_coords = [top_two[0][0], top_two[1][0], bottom_two[1][0], bottom_two[0][0]]
+        # print(sorted_coords)
+        return sorted_coords
+
     def draw_court_lines(self, frame, court_coords):
         """
         Draw court lines on the frame
@@ -51,17 +74,69 @@ class CourtDetector:
             frame: Input frame to draw lines on
             court_coords: Coordinates of the court boundaries
         """
-        # Draw lines connecting the court boundary points
-        cv2.line(frame, (court_coords[0][2], court_coords[0][3]), (court_coords[1][0], court_coords[1][3]), (255, 255, 255), 5)
-        cv2.line(frame, (court_coords[1][0], court_coords[1][3]), (court_coords[2][0], court_coords[2][1]), (255, 255, 255), 5)
-        cv2.line(frame, (court_coords[2][0], court_coords[2][1]), (court_coords[3][2], court_coords[3][1]), (255, 255, 255), 5)
-        cv2.line(frame, (court_coords[3][2], court_coords[3][1]), (court_coords[0][2], court_coords[0][3]), (255, 255, 255), 5)
         
-        #save the actual corners
-        actual_bounds=[]
-        actual_bounds.append((court_coords[0][2], court_coords[0][3]))
-        actual_bounds.append((court_coords[1][0], court_coords[1][3]))
-        actual_bounds.append((court_coords[2][0], court_coords[2][1]))
-        actual_bounds.append((court_coords[3][2], court_coords[3][1]))
-        # print(actual_bounds)
+        # print(court_coords)
+        top_left = (court_coords[0][2], court_coords[0][1])  # Top-left of the first box
+        top_right = (court_coords[1][0], court_coords[1][1])  # Top-right of the second box
+        bottom_right = (court_coords[2][0], court_coords[2][3])  # Bottom-right of the third box
+        bottom_left = (court_coords[3][2], court_coords[3][3])  # Bottom-left of the fourth box
+        
+        # print(f"Top Left: {top_left}")
+        # print(f"Top Right: {top_right}")
+        # print(f"Bottom Right: {bottom_right}")
+        # print(f"Bottom Left: {bottom_left}")
+
+        cv2.line(frame, top_left, top_right, (255, 255, 255), 5)  # Top line
+        cv2.line(frame, top_right, bottom_right, (255, 255, 255), 5)  # Right line
+        cv2.line(frame, bottom_right, bottom_left, (255, 255, 255), 5)  # Bottom line
+        cv2.line(frame, bottom_left, top_left, (255, 255, 255), 5)  # Left line
+
+        # Save the actual corners
+        actual_bounds = [top_left, top_right, bottom_right, bottom_left]
+        
         return actual_bounds
+    def compute_homography(self, court_coords):
+        """
+        Compute the homography matrix to map image coordinates to real-world coordinates.
+        
+        Args:
+            court_coords: List of 4 corner coordinates in the image [(x, y), ...]
+
+        Returns:
+            homography_matrix: The transformation matrix
+        """
+        # Real-world coordinates of a standard badminton court in meters
+        real_world_coords = np.array([
+            [0, 0],          # Top-left corner
+            [5.18, 0],        # Top-right corner
+            [5.18, 13.4],     # Bottom-right corner
+            [0, 13.4]        # Bottom-left corner
+        ], dtype=np.float32)
+
+        # Image coordinates (court corners)
+        image_coords = np.array(court_coords, dtype=np.float32)
+
+        # Compute the homography matrix
+        homography_matrix, _ = cv2.findHomography(image_coords, real_world_coords)
+        return homography_matrix
+
+    def translate_to_real_world(self, point, homography_matrix):
+        """
+        Translate a point from image coordinates to real-world coordinates.
+        
+        Args:
+            point: (x, y) coordinate in the image
+            homography_matrix: The transformation matrix
+
+        Returns:
+            real_world_point: Translated (x, y) coordinate in real-world space
+        """
+        # Convert the point to homogeneous coordinates
+        image_point = np.array([[point[0], point[1], 1]], dtype=np.float32).T
+
+        # Apply the homography transformation
+        real_world_point = np.dot(homography_matrix, image_point)
+
+        # Normalize to get the actual (x, y) in real-world space
+        real_world_point /= real_world_point[2]
+        return real_world_point[:2].flatten()
