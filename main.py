@@ -116,6 +116,7 @@ class BadmintonAnalyzer:
             return 1
         return 2
 
+
     def get_player_positions(self, frame_detections):
         """Get player positions in real-world coordinates"""
         players = []
@@ -425,3 +426,4 @@ if __name__ == "__main__":
     # for shot in shot_data:
         
         # print(f"Shot at frame {shot['frame_number']} ({shot['timestamp']:.2f}s) - Type: {shot['shot_info']['type']}")
+    

@@ -32,6 +32,8 @@ patterns.
 - OpenCV
 - YOLOv8
 - NumPy
+- Pandas
+- MediaPipe
 
 ## Project Structure
 ```bash
