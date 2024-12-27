@@ -4,7 +4,7 @@ import math
 import numpy as np
 
 class ShotDetector:
-    def __init__(self, buffer_size=10, distance_threshold=500, overlap_threshold=0.1):
+    def __init__(self, buffer_size=2, distance_threshold=100, overlap_threshold=0.1):
         """
         Initialize enhanced shot detector
         
@@ -86,10 +86,12 @@ class ShotDetector:
                         'shuttle_box': shuttle['box'],
                         'confidence': min(racket['confidence'], shuttle['confidence'])
                     }
-                    break
+                    self.last_shot_frame = frame_number
+                    return True, shot_info
+                
         
         # Technique 2: Check temporal overlap (racket position matches previous shuttle position)
-        if not shot_detected and len(self.frame_buffer) >= 5:
+        if not shot_detected and len(self.frame_buffer) >= 2:
             previous_shuttles = []
             for buf in self.frame_buffer[:]:  # Exclude current frame
                 previous_shuttles.extend([d for d in buf['detections'] if d['label'] == 'Shuttle'])
@@ -108,7 +110,8 @@ class ShotDetector:
                             'shuttle_box': shuttle['box'],
                             'confidence': min(racket['confidence'], shuttle['confidence'])
                         }
-                        break
+                        self.last_shot_frame = frame_number
+                        return True, shot_info
         
         # Technique 3: Check racket-shuttle overlap in current frame
         if not shot_detected:
@@ -125,7 +128,8 @@ class ShotDetector:
                             'shuttle_box': shuttle['box'],
                             'confidence': min(racket['confidence'], shuttle['confidence'])
                         }
-                        break
+                        self.last_shot_frame = frame_number
+                        return True, shot_info
         
         # Technique 4: Check for sudden change in shuttle direction
         if not shot_detected and len(self.frame_buffer) >= 3:
