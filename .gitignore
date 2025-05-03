@@ -1,0 +1,13 @@
+*.pycache 
+*.mp4
+*.csv
+*.jpg
+.DS_Store
+*.cfg
+*.pyc
+__pycache__
+badminton_env
+venv
+*.pt
+*.mov
+*.png
