@@ -16,7 +16,7 @@ RACKET_SHUTTLE_IOU_THRESHOLD = 0.5 # Min IoU for racket/shuttle confirmation
 WRIST_SHUTTLE_PROXIMITY_THRESHOLD = 250 # Max pixel distance for wrist/shuttle confirmation
 
 # Temporal Filtering
-MIN_FRAMES_BETWEEN_CONFIRMED_SHOTS = 20 # Min frames between two confirmed shots
+MIN_FRAMES_BETWEEN_CONFIRMED_SHOTS = 40 # Min frames between two confirmed shots
 FRAMES_BETWEEN_RALLIES = 250           # Frame gap to start a new rally
 
 # Trajectory Analysis Thresholds (Tune these)

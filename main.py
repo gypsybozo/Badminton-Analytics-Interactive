@@ -8,7 +8,7 @@ if __name__ == "__main__":
     # --- Configuration ---
     shuttle_model_path = "models/shuttle_player_racket/45epochs/best.pt"
     court_model_path = "models/court_detection/best.pt"
-    video_path = "/Users/kriti.bharadwaj03/Badminton_Analysis/input/video.mov" 
+    video_path = "/Users/kriti.bharadwaj03/Badminton_Analysis/input/Srikanth_Momota.mp4" 
     SAVE_OUTPUT_VIDEO = True
     DRAW_POSE_ON_VIDEO = True # Control pose drawing
 

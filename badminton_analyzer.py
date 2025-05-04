@@ -122,45 +122,6 @@ class BadmintonAnalyzer:
              except: return [(None, None),(None, None)], [(None, None),(None, None)], [None, None]
         else: return [(None, None),(None, None)], [(None, None),(None, None)], [None, None]
 
-
-    def _determine_likely_player(self, detections_candidate, shuttle_center_candidate):
-        """ Determines likely hitting player based on current frame data. """
-        likely_player = 0
-        try:
-             p_real_cand, p_img_ctr_cand, _ = self.get_player_positions(detections_candidate)
-             p1_real_cand, p2_real_cand = p_real_cand
-             p1_img_ctr_cand, p2_img_ctr_cand = p_img_ctr_cand
-
-             # Prefer homography if available and reliable
-             if p1_real_cand and p2_real_cand and self.homography_matrix is not None:
-                 shuttle_real_world_cand = None
-                 if shuttle_center_candidate:
-                      try: shuttle_real_world_cand = self.court_detector.translate_to_real_world(shuttle_center_candidate, self.homography_matrix)
-                      except: shuttle_real_world_cand = None
-                 # Check if real world coords are sensible (within court bounds +/- margin)
-                 if shuttle_real_world_cand is not None and \
-                    all(math.isfinite(c) for c in shuttle_real_world_cand) and \
-                    -1 < shuttle_real_world_cand[1] < COURT_LENGTH_METERS + 1: # Y check
-                     if shuttle_real_world_cand[1] < COURT_HALF_LENGTH_METERS: likely_player = 1
-                     else: likely_player = 2
-                     # print(f"    [DEBUG Likely Player] Via Homography: Shuttle RealY={shuttle_real_world_cand[1]:.2f} -> Player {likely_player}", flush=True) # Verbose
-                 elif shuttle_center_candidate: # Fallback to proximity if homog failed or out of bounds
-                      dist1 = calculate_distance(p1_img_ctr_cand, shuttle_center_candidate)
-                      dist2 = calculate_distance(p2_img_ctr_cand, shuttle_center_candidate)
-                      if dist1 < dist2: likely_player = 1
-                      elif dist2 < dist1: likely_player = 2
-                      # print(f"    [DEBUG Likely Player] Via Proximity (Homog Failed/OOB): P1 Dist={dist1:.1f}, P2 Dist={dist2:.1f} -> Player {likely_player}", flush=True) # Verbose
-             # Use image proximity if homography unavailable or only one player detected
-             elif shuttle_center_candidate:
-                 dist1 = calculate_distance(p1_img_ctr_cand, shuttle_center_candidate)
-                 dist2 = calculate_distance(p2_img_ctr_cand, shuttle_center_candidate)
-                 if dist1 < dist2: likely_player = 1
-                 elif dist2 < dist1: likely_player = 2
-                 # print(f"    [DEBUG Likely Player] Via Proximity (No Homog/One Player): P1 Dist={dist1:.1f}, P2 Dist={dist2:.1f} -> Player {likely_player}", flush=True) # Verbose
-        except Exception as e:
-             print(f"  [DEBUG Likely Player] Error during determination: {e}", flush=True)
-        return likely_player
-
     def process_video_with_shot_detection(self, save_output=True, output_path=None, draw_pose=True):
         """ Orchestrates the video processing pipeline using refactored components. """
         print("\nStarting Refactored Video Processing Pipeline...", flush=True)
@@ -284,7 +245,6 @@ class BadmintonAnalyzer:
         interpolated_positions = self.trajectory_analyzer.interpolate_shuttle_positions(shuttle_boxes_for_interp)
         phase2_duration = time.time() - phase2_start_time
         print(f"--- Phase 2 Duration: {phase2_duration:.2f}s ---", flush=True)
-        # (Add list length checks/trimming if needed)
 
         # --- Phase 3: Candidate Detection ---
         print("\n--- Phase 3: Detecting potential shot triggers ---", flush=True)
@@ -303,65 +263,64 @@ class BadmintonAnalyzer:
         self.last_confirmed_shot_frame_index = -float('inf')
 
         if candidate_shot_indices:
-             for candidate_idx, shot_candidate_idx in enumerate(candidate_shot_indices):
-                  if shot_candidate_idx - self.last_confirmed_shot_frame_index < MIN_FRAMES_BETWEEN_CONFIRMED_SHOTS: continue
+            for candidate_idx, shot_candidate_idx in enumerate(candidate_shot_indices):
+                if shot_candidate_idx - self.last_confirmed_shot_frame_index < MIN_FRAMES_BETWEEN_CONFIRMED_SHOTS:
+                    print(f"  [DEBUG BA Conf] Skipping candidate {shot_candidate_idx}, too close to last confirmed {self.last_confirmed_shot_frame_index}", flush=True)
+                    continue # Skip if too close to last confirmed
 
-                  # Determine Likely Player
-                  likely_player = 0
-                  if 0 <= shot_candidate_idx < len(all_detections_processed) and 0 <= shot_candidate_idx < len(interpolated_positions):
-                       shuttle_box_cand = interpolated_positions[shot_candidate_idx]
-                       shuttle_center_cand = get_bbox_center(shuttle_box_cand)
-                       likely_player = self._determine_likely_player(all_detections_processed[shot_candidate_idx], shuttle_center_cand)
-
-                  # Call ShotConfirmer
-                  confirmed, player_who_hit, method, conf_frame_idx = self.shot_confirmer.confirm_shot(
-                       shot_candidate_idx, likely_player,
-                       all_detections_processed, all_poses_processed,
-                       interpolated_positions, self.get_player_positions # Pass required data/methods
+                  # --- Call ShotConfirmer (No likely_player needed) ---
+                print(f"  [DEBUG BA] Calling confirm_shot for candidate index {shot_candidate_idx}", flush=True)
+                confirmed, player_who_hit, method, conf_frame_idx = self.shot_confirmer.confirm_shot(
+                    shot_candidate_idx, # Pass candidate index
+                    all_detections_processed, # Pass all collected data
+                    all_poses_processed,
+                    interpolated_positions,
+                    self.get_player_positions # Pass the method
                   )
+                print(f"  [DEBUG BA] confirm_shot returned: confirmed={confirmed}, player={player_who_hit}, method='{method}', conf_idx={conf_frame_idx}", flush=True)
 
-                  if confirmed:
-                      # (Rally Logic as before)
-                      if shot_candidate_idx - self.last_confirmed_shot_frame_index > FRAMES_BETWEEN_RALLIES:
-                            self.current_rally_id += 1
-                            self.current_shot_num_in_rally = 0
-                      self.current_shot_num_in_rally += 1
-                      self.last_confirmed_shot_frame_index = shot_candidate_idx
-                      confirmed_shot_indices.append(shot_candidate_idx)
+                if confirmed and player_who_hit != 0: # Check player_who_hit is valid
+                    # (Rally Logic - same as before)
+                    if shot_candidate_idx - self.last_confirmed_shot_frame_index > FRAMES_BETWEEN_RALLIES:
+                        self.current_rally_id += 1
+                        self.current_shot_num_in_rally = 0
+                        print(f"\n--- [DEBUG BA] New Rally (# {self.current_rally_id}) ---", flush=True)
+                    self.current_shot_num_in_rally += 1
+                    self.last_confirmed_shot_frame_index = shot_candidate_idx # Update based on *trigger* time
+                    confirmed_shot_indices.append(shot_candidate_idx)
 
-                      # (Gather Data & Create Entry as before)
-                      original_frame_num = processed_frame_idx_map.get(shot_candidate_idx, -1)
-                      frame_at_conf = all_frames_processed[conf_frame_idx] if 0 <= conf_frame_idx < len(all_frames_processed) else None
-                      detections_at_conf = all_detections_processed[conf_frame_idx] if 0 <= conf_frame_idx < len(all_detections_processed) else []
-                      p1_real_conf, p2_real_conf, p1_box_conf, p2_box_conf = None, None, None, None
-                      try:
-                         p_real_conf_tuple, _, p_box_conf_tuple = self.get_player_positions(detections_at_conf)
-                         p1_real_conf, p2_real_conf = p_real_conf_tuple
-                         p1_box_conf, p2_box_conf = p_box_conf_tuple
-                      except: pass
-                      shuttle_box_conf = interpolated_positions[conf_frame_idx] if 0 <= conf_frame_idx < len(interpolated_positions) else None
-                      shuttle_center_img_conf = get_bbox_center(shuttle_box_conf)
-                      shuttle_real_world_conf = None
-                      if shuttle_center_img_conf and self.homography_matrix is not None:
-                          try: shuttle_real_world_conf = self.court_detector.translate_to_real_world(shuttle_center_img_conf, self.homography_matrix)
-                          except: shuttle_real_world_conf = None
-
-                      shot_entry = {
-                           'rally_id': self.current_rally_id, 'shot_num': self.current_shot_num_in_rally,
-                           'player_who_hit': player_who_hit,
-                           'player1_coords': format_coords(p1_real_conf), 'player2_coords': format_coords(p2_real_conf),
-                           'shuttle_coords_impact': format_coords(shuttle_real_world_conf),
-                           'shot_played': "Unknown", 'stroke_hand': "Unknown", 'hitting_posture': "Normal",
-                           'confirmation_method': method,
-                           'frame_number': original_frame_num,
-                           'confirmation_frame': processed_frame_idx_map.get(conf_frame_idx, -1)
-                      }
-                      shot_dataset.append(shot_entry)
-
-                      # (Save Image using self.data_manager as before)
-                      racket_box_conf = next((d.get('box') for d in detections_at_conf if d.get('class_id') == RACKET_CLASS_ID), None)
-                      shot_info = {'shuttle_box': shuttle_box_conf, 'player1_box': p1_box_conf, 'player2_box': p2_box_conf, 'racket_box': racket_box_conf}
-                      self.data_manager.save_shot_image(frame_at_conf, shot_info, shot_entry)
+                    # (Gather Data & Create Entry - same as before, using player_who_hit)
+                    original_frame_num = processed_frame_idx_map.get(shot_candidate_idx, -1)
+                    frame_at_conf = all_frames_processed[conf_frame_idx] if 0 <= conf_frame_idx < len(all_frames_processed) else None
+                    detections_at_conf = all_detections_processed[conf_frame_idx] if 0 <= conf_frame_idx < len(all_detections_processed) else []
+                    # Get positions at confirmation frame
+                    p1_real_conf, p2_real_conf, p1_box_conf, p2_box_conf = None, None, None, None
+                    try:
+                       p_real_conf_tuple, _, p_box_conf_tuple = self.get_player_positions(detections_at_conf)
+                       p1_real_conf, p2_real_conf = p_real_conf_tuple
+                       p1_box_conf, p2_box_conf = p_box_conf_tuple
+                    except: pass
+                    shuttle_box_conf = interpolated_positions[conf_frame_idx] if 0 <= conf_frame_idx < len(interpolated_positions) else None
+                    shuttle_center_img_conf = get_bbox_center(shuttle_box_conf)
+                    shuttle_real_world_conf = None
+                    if shuttle_center_img_conf and self.homography_matrix is not None:
+                        try: shuttle_real_world_conf = self.court_detector.translate_to_real_world(shuttle_center_img_conf, self.homography_matrix)
+                        except: shuttle_real_world_conf = None
+                    shot_entry = {
+                         'rally_id': self.current_rally_id, 'shot_num': self.current_shot_num_in_rally,
+                         'player_who_hit': player_who_hit,
+                         'player1_coords': format_coords(p1_real_conf), 'player2_coords': format_coords(p2_real_conf),
+                         'shuttle_coords_impact': format_coords(shuttle_real_world_conf),
+                         'shot_played': "Unknown", 'stroke_hand': "Unknown", 'hitting_posture': "Normal",
+                         'confirmation_method': method,
+                         'frame_number': original_frame_num,
+                         'confirmation_frame': processed_frame_idx_map.get(conf_frame_idx, -1)
+                    }
+                    shot_dataset.append(shot_entry)
+                    # (Save Image using self.data_manager as before)
+                    racket_box_conf = next((d.get('box') for d in detections_at_conf if d.get('class_id') == RACKET_CLASS_ID), None)
+                    shot_info = {'shuttle_box': shuttle_box_conf, 'player1_box': p1_box_conf, 'player2_box': p2_box_conf, 'racket_box': racket_box_conf}
+                    self.data_manager.save_shot_image(frame_at_conf, shot_info, shot_entry)
 
         phase4_duration = time.time() - phase4_start_time
         print(f"--- Phase 4 Duration: {phase4_duration:.2f}s. Confirmed {len(shot_dataset)} shots. ---", flush=True)
