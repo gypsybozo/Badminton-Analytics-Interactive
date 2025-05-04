@@ -1,87 +1,92 @@
 # main.py
-from badminton_analyzer import BadmintonAnalyzer
+from badminton_analyzer import BadmintonAnalyzer # <-- Ensure this imports the refactored class
 import pandas as pd
-import sys # Import sys for detailed error handling
+import sys
+import traceback
 
 if __name__ == "__main__":
+    # --- Configuration ---
     shuttle_model_path = "models/shuttle_player_racket/45epochs/best.pt"
     court_model_path = "models/court_detection/best.pt"
-    video_path = "/Users/kriti.bharadwaj03/Badminton_Analysis/input/Srikanth_Momota.mp4" # Make sure this path is correct
+    video_path = "/Users/kriti.bharadwaj03/Badminton_Analysis/input/video.mov" 
+    SAVE_OUTPUT_VIDEO = True
+    DRAW_POSE_ON_VIDEO = True # Control pose drawing
 
+    # --- Analysis ---
     try:
-        analyzer = BadmintonAnalyzer(shuttle_model_path, court_model_path, video_path)
+        # Initialize the orchestrator
+        analyzer = BadmintonAnalyzer(
+            shuttle_model_path=shuttle_model_path,
+            court_model_path=court_model_path,
+            video_path=video_path,
+            conf_threshold=0.3, # Adjust as needed
+            frame_skip=1        # Adjust as needed (e.g., 2 or 3 for faster processing)
+        )
 
-        print("Starting badminton video analysis...")
-        print("Processing video to detect shots based on direction changes...")
+        print("Starting badminton video analysis...", flush=True)
 
-        # Run direction-based shot detection with improved trajectory analysis
-        result = analyzer.process_video_with_shot_detection(save_output=True)
+        # Run the main processing pipeline
+        result = analyzer.process_video_with_shot_detection(
+            save_output=SAVE_OUTPUT_VIDEO,
+            draw_pose=DRAW_POSE_ON_VIDEO
+        )
 
         if result is None:
-             print("\nAnalysis failed. Exiting.")
-             sys.exit(1) # Exit if analysis function returned None
+             print("\nAnalysis returned None. Exiting.", flush=True)
+             sys.exit(1)
 
-        print(f"\nAnalysis complete!")
+        print(f"\nAnalysis complete!", flush=True)
 
-        # --- MODIFIED LINE ---
-        # Use the correct key 'shots_processed_indices' to get the list of shots
-        num_shots = len(result.get('shots_processed_indices', [])) # Use .get for safety
+        # --- Report Results ---
+        confirmed_shots_dataset = result.get('dataset', [])
+        num_confirmed_shots = len(confirmed_shots_dataset)
+        confirmed_indices = result.get('shots_confirmed_indices', []) # Use the correct key
 
-        # Calculate max rally ID safely
         max_rally = 0
-        if result.get('dataset'): # Check if dataset is not empty
+        if confirmed_shots_dataset:
             try:
-                 max_rally = max(item['rally_id'] for item in result['dataset'] if isinstance(item.get('rally_id'), int))
-            except ValueError: # Handles case where dataset is empty after filtering Nones
-                 max_rally = 0 # Default to 0 if no valid rally_id found
+                 valid_rallies = [item['rally_id'] for item in confirmed_shots_dataset if isinstance(item.get('rally_id'), int)]
+                 if valid_rallies: max_rally = max(valid_rallies)
+            except Exception as e: print(f"Warning: Could not determine max rally ID: {e}", flush=True)
 
+        print(f"\n--- Results Summary ---", flush=True)
+        print(f"Total Processed Frames: {result.get('total_processed_frames', 'N/A')}", flush=True)
+        print(f"Confirmed Shot Events (Triggers): {len(confirmed_indices)}", flush=True) # Number of triggers confirmed
+        print(f"Entries in Shot Dataset: {num_confirmed_shots}", flush=True) # Should match above if no errors
+        print(f"Rallies Identified: {max_rally}", flush=True)
 
-        print(f"Detected {num_shots} shots across {max_rally} rallies")
-        # --- END MODIFIED LINES ---
-
-
-        # Display dataset summary if dataset exists and is not empty
-        dataset = result.get('dataset', [])
-        if dataset:
-            dataset_df = pd.DataFrame(dataset)
+        # Display dataset summary
+        if confirmed_shots_dataset:
+            dataset_df = pd.DataFrame(confirmed_shots_dataset)
             print("\nDataset summary:")
-            print(f"Total shots in dataset: {len(dataset_df)}")
             if not dataset_df.empty and 'player_who_hit' in dataset_df.columns:
-                # Count only valid player hits (1 or 2)
                 p1_hits = len(dataset_df[dataset_df['player_who_hit'] == 1])
                 p2_hits = len(dataset_df[dataset_df['player_who_hit'] == 2])
                 unknown_hits = len(dataset_df[dataset_df['player_who_hit'] == 0])
                 print(f"  Shots by player 1: {p1_hits}")
                 print(f"  Shots by player 2: {p2_hits}")
-                if unknown_hits > 0:
-                    print(f"  Shots with unknown player: {unknown_hits}")
-            else:
-                 print("  Could not calculate hits per player (Dataset empty or 'player_who_hit' column missing).")
+                if unknown_hits > 0: print(f"  Shots with unknown player: {unknown_hits}")
+            else: print("  Could not calculate hits per player.")
 
-            if result.get('dataset_path'):
-                print(f"\nDataset saved to {result['dataset_path']}")
+            if result.get('dataset_path'): print(f"\nDataset saved to: {result['dataset_path']}")
+            else: print("\nDataset CSV was not saved.")
         else:
             print("\nDataset is empty.")
 
-
-        print(f"Shot images saved to '{analyzer.shots_output_dir}/' directory")
+        # Report output file locations
+        print(f"Shot images saved to '{analyzer.shots_output_dir}/' directory") # Access from analyzer instance
         print(f"Player shot images saved to '{analyzer.player_shots_dir}/' directory")
-        if result.get('video_output_path'):
-             print(f"Output video saved to {result['video_output_path']}")
-        else:
-             print("Output video was not saved.")
-
+        if result.get('video_output_path'): print(f"Output video saved to: {result['video_output_path']}")
+        else: print("Output video was not saved.")
 
     except FileNotFoundError as e:
-        print(f"\nFATAL ERROR: A required file was not found.")
-        print(e)
+        print(f"\nFATAL ERROR: A required file was not found.", flush=True)
+        print(e, flush=True)
         sys.exit(1)
     except KeyError as e:
-         print(f"\nERROR: Missing expected key in analysis results: {e}")
-         print("This might indicate an issue during the analysis processing.")
+         print(f"\nERROR: Missing expected key in analysis results: {e}", flush=True)
          sys.exit(1)
     except Exception as e:
-        print(f"\nAn unexpected error occurred in main.py: {e}")
-        import traceback
+        print(f"\nAn unexpected error occurred in main.py: {e}", flush=True)
         traceback.print_exc()
         sys.exit(1)
