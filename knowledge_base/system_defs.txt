@@ -1,0 +1,39 @@
+# System Definitions for Badminton Analysis RAG
+
+## Data Columns & Meaning:
+
+*   **rally_id**: An integer identifying a unique sequence of shots ending in a point or stoppage.
+*   **shot_num**: The sequential number of a shot within a specific rally (e.g., 1, 2, 3...).
+*   **player_who_hit**: The player identified as hitting the shuttle for this specific shot.
+    *   1: Player starting in the bottom half of the court (based on initial Y coordinate).
+    *   2: Player starting in the top half of the court.
+    *   0: Player could not be determined.
+*   **player1_coords**: Estimated real-world court coordinates (X, Y) in meters for Player 1 near the time of the shot confirmation. (X=0 is left sideline, Y=0 is bottom baseline, Y increases upwards). Format: "(X.XXXX, Y.YYYY)". Value might be null if player not detected.
+*   **player2_coords**: Estimated real-world court coordinates (X, Y) in meters for Player 2 near the time of the shot confirmation. (X=0 is left sideline, Y=0 is bottom baseline, Y increases upwards). Format: "(X.XXXX, Y.YYYY)". Value might be null if player not detected.
+*   **shuttle_coords_impact**: Estimated real-world court coordinates (X, Y) in meters for the shuttlecock near the time of shot confirmation. (X=0 is left sideline, Y=0 is bottom baseline, Y increases upwards). Format: "(X.XXXX, Y.YYYY)". Value might be null. *Note: This dataset currently shows this column as empty.*
+*   **shot_played**: Classification of the type of shot (e.g., Smash, Drop, Clear, Lift, Drive, Net Shot). *Note: This dataset currently shows this column as "Unknown" as classification is not yet implemented.*
+*   **stroke_hand**: Classification of the stroke based on player pose analysis (assuming both players are right-handed unless specified otherwise).
+    *   Forehand High: Contact above or near the right shoulder level on the right side of the torso centerline.
+    *   Backhand High: Contact above or near the right shoulder level on the left side of the torso centerline.
+    *   Forehand Low: Contact below right shoulder level on the right side of the torso centerline.
+    *   Backhand Low: Contact below right shoulder level on the left side of the torso centerline.
+    *   Unknown (IoU): Shot confirmed by Racket-Shuttle IoU, hitting wrist could not be determined for stroke analysis.
+    *   Unknown: Stroke could not be determined (e.g., missing pose data).
+*   **hitting_posture**: Analysis of the hitting player's posture at the time of the shot.
+    *   Normal: Player appears balanced and in a standard ready or hitting stance.
+*   **confirmation_method**: How the shot event was confirmed by the system.
+    *   IoU (X.XXX): Confirmed by Racket-Shuttle Intersection over Union exceeding threshold. Value is the IoU score.
+    *   Wrist (XX.Xpx): Confirmed by hitting wrist proximity to shuttle being below threshold. Value is the distance in pixels.
+*   **frame_number**: The original frame number in the video where the shot *candidate* (initial trajectory change) was detected.
+*   **confirmation_frame**: The original frame number in the video where the shot *confirmation* (IoU or Wrist proximity) occurred. This is likely the frame closest to the actual impact.
+
+## Coordinate System Reminder:
+
+*   Real-world coordinates are estimated using homography.
+*   Origin (0,0) is typically the bottom-left corner of the court from a standard broadcast view.
+*   X-axis runs along the baseline (width, approx 0 to 5.18 meters).
+*   Y-axis runs along the sideline (length, approx 0 to 13.4 meters). Y increases going *up* the screen (further from the bottom baseline).
+
+## Handedness Assumption:
+
+*   Unless otherwise specified (e.g., via configuration), the `stroke_hand` classification currently assumes **both Player 1 and Player 2 are right-handed**. Interpret "Forehand" and "Backhand" accordingly based on the side of the player's body relative to their torso centerline.

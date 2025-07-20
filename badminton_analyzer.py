@@ -19,20 +19,37 @@ from shot_confirmer import ShotConfirmer
 from video_output import VideoOutputWriter
 from data_manager import DataManager
 from utils.constants import (PLAYER_CLASS_ID, RACKET_CLASS_ID, SHUTTLE_CLASS_ID,
-                             COURT_LENGTH_METERS, COURT_HALF_LENGTH_METERS,
-                             MIN_FRAMES_BETWEEN_CONFIRMED_SHOTS, FRAMES_BETWEEN_RALLIES)
+                             COURT_LENGTH_METERS, COURT_HALF_LENGTH_METERS,COURT_WIDTH_METERS,
+                             MIN_FRAMES_BETWEEN_CONFIRMED_SHOTS, FRAMES_BETWEEN_RALLIES, 
+                             RACKET_SHUTTLE_IOU_THRESHOLD,
+                             WRIST_SHUTTLE_PROXIMITY_THRESHOLD, CONFIRMATION_WINDOW,
+                             LEFT_WRIST, RIGHT_WRIST, RIGHT_HANDED, LEFT_HANDED)
 from utils.geom import format_coords, get_bbox_center, calculate_distance
+from pose_analyzer import PoseAnalyzer # <-- Import new class
 
 class BadmintonAnalyzer:
-    def __init__(self, shuttle_model_path, court_model_path, video_path, conf_threshold=0.3, frame_skip=1):
+    def __init__(self, shuttle_model_path, court_model_path, video_path, conf_threshold=0.3, frame_skip=1,player1_handedness=LEFT_HANDED,
+                 player2_handedness=RIGHT_HANDED):
         """ Initializes the BadmintonAnalyzer orchestrator and its components. """
         print("Initializing BadmintonAnalyzer Orchestrator...", flush=True)
         self.video_path = video_path
         self.conf_threshold = conf_threshold
         self.frame_skip = max(1, frame_skip)
         self.homography_matrix = None
+        self.inverse_homography_matrix = None
         self.court_corners = None
         self.class_labels = None
+        
+        self.real_world_test_points = {
+            # Format: [X, Y, 1] - Z=1 for homogeneous coordinates
+            "BotL": np.array([0, 0, 1], dtype=np.float32),
+            "BotR": np.array([COURT_WIDTH_METERS, 0, 1], dtype=np.float32),
+            "NetLB": np.array([0, COURT_HALF_LENGTH_METERS, 1], dtype=np.float32), # Net Left Bottom
+            "NetRB": np.array([COURT_WIDTH_METERS, COURT_HALF_LENGTH_METERS, 1], dtype=np.float32), # Net Right Bottom
+            "TopL": np.array([0, COURT_LENGTH_METERS, 1], dtype=np.float32),
+            "TopR": np.array([COURT_WIDTH_METERS, COURT_LENGTH_METERS, 1], dtype=np.float32),
+            "MidC": np.array([COURT_WIDTH_METERS/2, COURT_HALF_LENGTH_METERS, 1], dtype=np.float32) # Center of Net Line
+        }
 
         # --- Load Models ---
         try:
@@ -73,6 +90,7 @@ class BadmintonAnalyzer:
             self.frame_processor = FrameProcessor(self.yolo_model, self.class_labels)
             self.shot_confirmer = ShotConfirmer(self.frame_processor) # Pass frame_processor
             self.data_manager = DataManager()
+            self.pose_analyzer = PoseAnalyzer()
             # Store output dirs for main.py reporting
             self.shots_output_dir = self.data_manager.shots_output_dir
             self.player_shots_dir = self.data_manager.player_shots_dir
@@ -83,7 +101,23 @@ class BadmintonAnalyzer:
         self.current_rally_id = 0
         self.current_shot_num_in_rally = 0
         self.last_confirmed_shot_frame_index = -float('inf')
-
+        
+        # --- Store Handedness (String version) ---
+        self.player_handedness_str = { # Renamed to avoid confusion, used by PoseAnalyzer
+            1: player1_handedness.lower(),
+            2: player2_handedness.lower()
+        }
+        # print(player_handedness_str)
+        print(f"  Player Handedness (String): P1={self.player_handedness_str[1]}, P2={self.player_handedness_str[2]}", flush=True)
+        self.player_dominant_wrist_idx = {
+            1: RIGHT_WRIST if self.player_handedness_str[1] == "right_handed" else LEFT_WRIST,
+            2: RIGHT_WRIST if self.player_handedness_str[2] == "right_handed" else LEFT_WRIST
+        }
+        print(f"  Player Dominant Wrist Indices: P1={self.player_dominant_wrist_idx[1]} (is RIGHT_WRIST: {self.player_dominant_wrist_idx[1] == RIGHT_WRIST}), P2={self.player_dominant_wrist_idx[2]} (is RIGHT_WRIST: {self.player_dominant_wrist_idx[2] == RIGHT_WRIST})", flush=True)
+        
+        print(f"  Player Handedness: P1={self.player_handedness_str[1]}, P2={self.player_handedness_str[2]}", flush=True)
+        if self.player_handedness_str[1] not in [RIGHT_HANDED, LEFT_HANDED] or self.player_handedness_str[2] not in [RIGHT_HANDED, LEFT_HANDED]:
+            print("Warning: Invalid handedness specified. Please use 'right' or 'left'. Defaulting might occur or errors later.")
         print("BadmintonAnalyzer Orchestrator initialized successfully.", flush=True)
 
     def get_player_positions(self, frame_detections):
@@ -155,7 +189,7 @@ class BadmintonAnalyzer:
         # Reset homography state for this run
         self.homography_matrix = None
         self.court_corners = None
-        court_detection_done = False # <-- INITIALIZE HERE
+        court_detection_done = False #
         last_p1_box, last_p2_box = None, None
 
         # --- Phase 1: Frame Collection ---
@@ -174,38 +208,46 @@ class BadmintonAnalyzer:
 
             # --- Homography (Once) ---
             if not court_detection_done and processed_frame_count <= 10:
-             print("  [DEBUG BA] Checking Court/Homography...", flush=True)
-             homography_start_time = time.time()
-             try:
-                 # --- ### START: FILL IN HOMOGRAPHY LOGIC ### ---
-                 temp_court_coords = self.court_detector.detect_court_boundary(frame)
-                 if temp_court_coords and len(temp_court_coords) == 4: # Or adjust condition based on your detector
-                    print("    [DEBUG BA] Court boundary detected (potential corners).", flush=True)
-                    # Assuming sort_court_coords returns sorted boxes/coords needed for corner derivation
-                    self.court_coords = self.court_detector.sort_court_coords(temp_court_coords)
-                    # Assuming draw_court_lines returns the 4 corner points needed for homography
-                    corners = self.court_detector.draw_court_lines(frame_copy, self.court_coords) # Pass a copy if it draws
-
-                    if corners and len(corners) == 4:
-                        print(f"    [DEBUG BA] Derived corners: {corners}", flush=True)
-                        self.homography_matrix = self.court_detector.compute_homography(corners)
-                        if self.homography_matrix is not None:
-                            print(f"INFO: Homography computed successfully at frame {current_original_frame}!", flush=True)
-                            self.court_corners = corners # Store the corners used
-                            court_detection_done = True
-                            print(f"    [DEBUG BA] Homography duration: {time.time() - homography_start_time:.4f}s", flush=True)
+                print("  [DEBUG BA] Checking Court/Homography...", flush=True)
+                homography_start_time = time.time()
+                try:
+                    temp_court_coords = self.court_detector.detect_court_boundary(frame)
+                    if temp_court_coords and len(temp_court_coords) == 4: # Or adjust condition based on your detector
+                        print("    [DEBUG BA] Court boundary detected (potential corners).", flush=True)
+                        # Assuming sort_court_coords returns sorted boxes/coords needed for corner derivation
+                        self.court_coords = self.court_detector.sort_court_coords(temp_court_coords)
+                        # Assuming draw_court_lines returns the 4 corner points needed for homography
+                        corners = self.court_detector.draw_court_lines(frame_copy, self.court_coords) # Pass a copy if it draws
+    
+                        if corners and len(corners) == 4:
+                            print(f"    [DEBUG BA] Derived corners: {corners}", flush=True)
+                            self.homography_matrix = self.court_detector.compute_homography(corners)
+                            if self.homography_matrix is not None:
+                                print(f"INFO: Homography computed successfully at frame {current_original_frame}!", flush=True)
+                                self.court_corners = corners # Store the corners used
+                                court_detection_done = True
+                                print(f"    [DEBUG BA] Homography duration: {time.time() - homography_start_time:.4f}s", flush=True)
+                                try:
+                                    self.inverse_homography_matrix = np.linalg.inv(self.homography_matrix)
+                                    print("  [DEBUG BA] Inverse homography matrix computed.", flush=True)
+                                except np.linalg.LinAlgError:
+                                    print("WARNING: Homography matrix is singular, cannot compute inverse.", flush=True)
+                                    self.inverse_homography_matrix = None
+                            else:
+                                print(f"WARNING: Homography computation failed at frame {current_original_frame}.", flush=True)
+                                self.court_corners = None
+                                self.inverse_homography_matrix = None
                         else:
-                            print(f"WARNING: Homography computation failed at frame {current_original_frame}.", flush=True)
-                            self.court_corners = None
-                    else:
-                        print(f"    [DEBUG BA] Failed to derive valid corners at frame {current_original_frame}.", flush=True)
-                 # --- ### END: FILL IN HOMOGRAPHY LOGIC ### ---
-             except Exception as e:
-                  print(f"    [DEBUG BA] ERROR during court detection/homography attempt: {e}\n{traceback.format_exc()}", flush=True)
-             # Check if still not done after trying
-             if not court_detection_done and processed_frame_count == 10:
-                  print("INFO: Court/Homography not detected in initial frames. Proceeding without it.", flush=True)
-                  court_detection_done = True # Stop trying
+                            print(f"    [DEBUG BA] Failed to derive valid corners at frame {current_original_frame}.", flush=True)
+                            self.inverse_homography_matrix = None
+                    # --- ### END: FILL IN HOMOGRAPHY LOGIC ### ---
+                except Exception as e:
+                    print(f"    [DEBUG BA] ERROR during court detection/homography attempt: {e}\n{traceback.format_exc()}", flush=True)
+                    self.inverse_homography_matrix = None
+                # Check if still not done after trying
+                if not court_detection_done and processed_frame_count == 10:
+                    print("INFO: Court/Homography not detected in initial frames. Proceeding without it.", flush=True)
+                    court_detection_done = True # Stop trying
 
             # --- Process Frame (using FrameProcessor) ---
             detections, shuttle_candidates, poses, pose_dur = self.frame_processor.process_frame(
@@ -235,7 +277,6 @@ class BadmintonAnalyzer:
         phase1_duration = time.time() - phase1_start_time
         print(f"\n--- Phase 1 Summary ---", flush=True)
         print(f"Duration: {phase1_duration:.2f}s. Processed {processed_frame_count} frames.", flush=True)
-        # (Add list length checks/trimming if needed)
 
         # --- Phase 2: Interpolation & Best Shuttle Selection ---
         print("\n--- Phase 2: Interpolating shuttle positions ---", flush=True)
@@ -270,14 +311,15 @@ class BadmintonAnalyzer:
 
                   # --- Call ShotConfirmer (No likely_player needed) ---
                 print(f"  [DEBUG BA] Calling confirm_shot for candidate index {shot_candidate_idx}", flush=True)
-                confirmed, player_who_hit, method, conf_frame_idx = self.shot_confirmer.confirm_shot(
-                    shot_candidate_idx, # Pass candidate index
-                    all_detections_processed, # Pass all collected data
-                    all_poses_processed,
-                    interpolated_positions,
-                    self.get_player_positions # Pass the method
-                  )
-                print(f"  [DEBUG BA] confirm_shot returned: confirmed={confirmed}, player={player_who_hit}, method='{method}', conf_idx={conf_frame_idx}", flush=True)
+                confirmed, player_who_hit, method, conf_frame_idx, hitting_wrist_info = \
+                      self.shot_confirmer.confirm_shot(
+                           shot_candidate_idx,
+                           all_detections_processed, all_poses_processed,
+                           interpolated_positions, self.get_player_positions,
+                           self.player_dominant_wrist_idx[1], # <-- Pass P1's dominant wrist index
+                           self.player_dominant_wrist_idx[2]  # <-- Pass P2's dominant wrist index
+                      )
+                print(f"  [DEBUG BA] confirm_shot returned: confirmed={confirmed}, player={player_who_hit}, method='{method}', conf_idx={conf_frame_idx}, wrist_info={hitting_wrist_info is not None}", flush=True)
 
                 if confirmed and player_who_hit != 0: # Check player_who_hit is valid
                     # (Rally Logic - same as before)
@@ -296,9 +338,12 @@ class BadmintonAnalyzer:
                     # Get positions at confirmation frame
                     p1_real_conf, p2_real_conf, p1_box_conf, p2_box_conf = None, None, None, None
                     try:
-                       p_real_conf_tuple, _, p_box_conf_tuple = self.get_player_positions(detections_at_conf)
-                       p1_real_conf, p2_real_conf = p_real_conf_tuple
-                       p1_box_conf, p2_box_conf = p_box_conf_tuple
+                        p_real_conf_tuple, _, p_box_conf_tuple = self.get_player_positions(detections_at_conf)
+                        p1_real_conf, p2_real_conf = p_real_conf_tuple
+                        p1_box_conf, p2_box_conf = p_box_conf_tuple
+                        p1_landmarks_conf, p2_landmarks_conf = None, None
+                        if 0 <= conf_frame_idx < len(all_poses_processed):
+                            p1_landmarks_conf, p2_landmarks_conf = all_poses_processed[conf_frame_idx]
                     except: pass
                     shuttle_box_conf = interpolated_positions[conf_frame_idx] if 0 <= conf_frame_idx < len(interpolated_positions) else None
                     shuttle_center_img_conf = get_bbox_center(shuttle_box_conf)
@@ -306,12 +351,44 @@ class BadmintonAnalyzer:
                     if shuttle_center_img_conf and self.homography_matrix is not None:
                         try: shuttle_real_world_conf = self.court_detector.translate_to_real_world(shuttle_center_img_conf, self.homography_matrix)
                         except: shuttle_real_world_conf = None
+                        
+                    # --- <<< NEW: Analyze Stroke Type >>> ---
+                    stroke_hand = "Unknown"
+                    player_landmarks_conf = p1_landmarks_conf if player_who_hit == 1 else p2_landmarks_conf
+                    player_box_conf = p1_box_conf if player_who_hit == 1 else p2_box_conf
+                    player_actual_handedness = self.player_handedness_str.get(player_who_hit, RIGHT_HANDED)
+                    if player_landmarks_conf and hitting_wrist_info and player_box_conf:
+                        # Get image dimensions for coordinate context
+                        frame_h, frame_w = all_frames_processed[conf_frame_idx].shape[:2]
+                        # We need the hitting wrist coordinate and index
+                        wrist_coord = hitting_wrist_info['coord']
+                        wrist_idx = hitting_wrist_info['index']
+                        # Call analyzer
+                        stroke_hand = self.pose_analyzer.analyze_stroke_type(
+                              player_id=player_who_hit,
+                              handedness=player_actual_handedness, # <-- Pass handedness
+                              landmarks=player_landmarks_conf,
+                              hitting_wrist_coord=wrist_coord,
+                              hitting_wrist_index=wrist_idx,
+                              img_width=frame_w,
+                              img_height=frame_h
+                          )
+                    elif player_landmarks_conf and method.startswith("IoU"):
+                        # If IoU confirmed, we don't know the *exact* wrist, estimate based on geometry?
+                        # Or just leave as Unknown for now? Leaving as Unknown is safer.
+                        print(f"    [DEBUG BA Stroke] Stroke analysis skipped for IoU confirmation (hitting wrist unknown).")
+                        stroke_hand = "Unknown (IoU)"
+                    else:
+                        print(f"    [DEBUG BA Stroke] Skipping stroke analysis (missing landmarks, wrist info, or player box).")
+                    # --- <<< END: Analyze Stroke Type >>> ---
                     shot_entry = {
                          'rally_id': self.current_rally_id, 'shot_num': self.current_shot_num_in_rally,
                          'player_who_hit': player_who_hit,
                          'player1_coords': format_coords(p1_real_conf), 'player2_coords': format_coords(p2_real_conf),
                          'shuttle_coords_impact': format_coords(shuttle_real_world_conf),
-                         'shot_played': "Unknown", 'stroke_hand': "Unknown", 'hitting_posture': "Normal",
+                         'shot_played': "Unknown", 
+                         'stroke_hand': stroke_hand, 
+                         'hitting_posture': "Normal",
                          'confirmation_method': method,
                          'frame_number': original_frame_num,
                          'confirmation_frame': processed_frame_idx_map.get(conf_frame_idx, -1)
@@ -329,32 +406,37 @@ class BadmintonAnalyzer:
         print("\n--- Phase 5: Creating output video ---", flush=True)
         phase5_start_time = time.time()
         if save_output and video_writer and video_writer.is_opened():
-             print(f"  [DEBUG BA] Writing video frames...", flush=True)
-             for frame_idx, orig_frame_num in processed_frame_idx_map.items():
-                  # Boundary checks for all necessary lists
-                  if not (0 <= frame_idx < len(all_frames_processed) and \
-                          0 <= frame_idx < len(interpolated_positions) and \
-                          0 <= frame_idx < len(best_shuttles) and \
-                          0 <= frame_idx < len(all_poses_processed) and \
-                          0 <= frame_idx < len(all_player_boxes_processed)):
-                          continue # Skip if any list index is invalid
-
-                  frame_to_write = all_frames_processed[frame_idx]
-                  shuttle_box = interpolated_positions[frame_idx]
-                  shuttle_detected_originally = isinstance(best_shuttles[frame_idx], dict)
-                  p1_landmarks, p2_landmarks = all_poses_processed[frame_idx]
-                  p1_box, p2_box = all_player_boxes_processed[frame_idx]
-
-                  video_writer.write_frame(
-                       frame=frame_to_write, frame_index=frame_idx, original_frame_num=orig_frame_num,
-                       court_corners=self.court_corners, interpolated_shuttle_box=shuttle_box,
-                       shuttle_detection_status=shuttle_detected_originally,
-                       p1_landmarks=p1_landmarks, p2_landmarks=p2_landmarks, p1_box=p1_box, p2_box=p2_box,
-                       confirmed_shot_indices=confirmed_shot_indices, shot_dataset=shot_dataset,
-                       draw_pose=draw_pose # Pass the flag
-                  )
-             video_writer.release()
-        # (Handle cases where saving was disabled or writer failed)
+            print(f"  [DEBUG BA] Writing video frames...", flush=True)
+            for frame_idx, orig_frame_num in processed_frame_idx_map.items():
+                 # Boundary checks for all necessary lists
+                if not (0 <= frame_idx < len(all_frames_processed) and \
+                        0 <= frame_idx < len(interpolated_positions) and \
+                        0 <= frame_idx < len(best_shuttles) and \
+                        0 <= frame_idx < len(all_poses_processed) and \
+                        0 <= frame_idx < len(all_player_boxes_processed)):
+                    continue # Skip if any list index is invalid
+                frame_to_write = all_frames_processed[frame_idx]
+                shuttle_box = interpolated_positions[frame_idx]
+                shuttle_detected_originally = isinstance(best_shuttles[frame_idx], dict)
+                p1_landmarks, p2_landmarks = all_poses_processed[frame_idx]
+                p1_box, p2_box = all_player_boxes_processed[frame_idx]
+                current_detections = all_detections_processed[frame_idx]
+                video_writer.write_frame(
+                     frame=frame_to_write, frame_index=frame_idx, original_frame_num=orig_frame_num,
+                     court_corners=self.court_corners, # Pass detected corners
+                     interpolated_shuttle_box=shuttle_box,
+                     shuttle_detection_status=shuttle_detected_originally,
+                     p1_landmarks=p1_landmarks, p2_landmarks=p2_landmarks, p1_box=p1_box, p2_box=p2_box,
+                     confirmed_shot_indices=confirmed_shot_indices, shot_dataset=shot_dataset,
+                     draw_pose=draw_pose,
+                     # --- Pass homography details ---
+                     current_detections=current_detections, # Pass detections needed for get_player_positions
+                     get_player_positions_func=self.get_player_positions, # Pass method
+                     inverse_homography_matrix=self.inverse_homography_matrix, # Pass inverse matrix
+                     real_world_test_points=self.real_world_test_points # Pass test points
+                     # --- End Pass homography details ---
+                )
+            video_writer.release()
         phase5_duration = time.time() - phase5_start_time
         print(f"--- Phase 5 Duration: {phase5_duration:.2f}s ---", flush=True)
 

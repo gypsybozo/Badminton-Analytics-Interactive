@@ -3,6 +3,7 @@ from badminton_analyzer import BadmintonAnalyzer # <-- Ensure this imports the r
 import pandas as pd
 import sys
 import traceback
+from utils.constants import RIGHT_HANDED, LEFT_HANDED
 
 if __name__ == "__main__":
     # --- Configuration ---
@@ -11,6 +12,9 @@ if __name__ == "__main__":
     video_path = "/Users/kriti.bharadwaj03/Badminton_Analysis/input/Srikanth_Momota.mp4" 
     SAVE_OUTPUT_VIDEO = True
     DRAW_POSE_ON_VIDEO = True # Control pose drawing
+    
+    PLAYER_1_HAND = RIGHT_HANDED # Or LEFT_HANDED
+    PLAYER_2_HAND = RIGHT_HANDED # Or LEFT_HANDED
 
     # --- Analysis ---
     try:
@@ -19,10 +23,12 @@ if __name__ == "__main__":
             shuttle_model_path=shuttle_model_path,
             court_model_path=court_model_path,
             video_path=video_path,
-            conf_threshold=0.3, # Adjust as needed
-            frame_skip=1        # Adjust as needed (e.g., 2 or 3 for faster processing)
+            conf_threshold=0.3,
+            frame_skip=1,
+            player1_handedness=PLAYER_1_HAND, # Pass to init
+            player2_handedness=PLAYER_2_HAND  # Pass to init
         )
-
+        
         print("Starting badminton video analysis...", flush=True)
 
         # Run the main processing pipeline

@@ -2,7 +2,29 @@
 import math
 import numpy as np
 import pandas as pd # For isnan check
+from trackers.court import CourtDetector
 
+def get_shuttle_ground_projection(shuttle_box_image, homography_matrix):
+        if shuttle_box_image is None or homography_matrix is None:
+            return None
+        # Option 1: Use centroid (simpler if bottom isn't clear)
+        shuttle_center_image = get_bbox_center(shuttle_box_image)
+        if not shuttle_center_image: return None
+        # Option 2: Try to estimate bottom-center of shuttle if possible (more accurate for ground)
+        # This is tricky for a small, fast object. Centroid might be more robust.
+        # For now, let's use centroid:
+        point_to_project = shuttle_center_image
+
+        try:
+            # Homography expects (x, y)
+            real_world_coords = CourtDetector.translate_to_real_world( # Assuming CourtDetector has this static/class method
+                point_to_project, homography_matrix
+            )
+            if real_world_coords is not None and not np.isnan(real_world_coords).any():
+                return tuple(real_world_coords[:2]) # Return (X_ground, Y_ground)
+        except Exception as e:
+            print(f"    [DEBUG SHUTTLE PROJ] Error projecting shuttle point {point_to_project}: {e}", flush=True)
+        return None
 def calculate_distance(point1, point2):
     """Calculate Euclidean distance between two points"""
     if point1 is None or point2 is None: return float('inf')

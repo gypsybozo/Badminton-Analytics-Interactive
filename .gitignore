@@ -11,3 +11,4 @@ venv
 *.pt
 *.mov
 *.png
+.env
